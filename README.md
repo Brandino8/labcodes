@@ -19,7 +19,7 @@ More information can be founded in his [youtube channel](https://www.youtube.com
 
 - Matlab folder has all the code for processing series data after consolidation
 - Python folder has the gui for hBN thickness measurement
-- Data folder has traning set for SVM algrithm
+- Data folder has traning set for SVM algrithm.
 
 
 ### What we will have in the future
