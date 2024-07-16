@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn import svm
 import pickle
+import pyautogui
 
 class SVMTrainerApp:
     def __init__(self, root):
@@ -16,7 +17,9 @@ class SVMTrainerApp:
         self.image_frame.pack(side=tk.LEFT, padx=10, pady=10)
         
         # Canvas for displaying the image
-        self.canvas = tk.Canvas(self.image_frame, width=1280, height=960)
+        screen_height=root.winfo_screenheight()-200
+        screen_width=root.winfo_screenwidth()-300
+        self.canvas = tk.Canvas(self.image_frame, width=screen_width, height=screen_height)
         self.canvas.pack()
         
         # Frame for thickness buttons
@@ -26,6 +29,7 @@ class SVMTrainerApp:
         # Load image button
         self.btn_load_image = tk.Button(self.thickness_frame, text="Load Image", command=self.load_image)
         self.btn_load_image.pack(pady=10)
+        print('test')
         
         # Background button
         self.btn_background = tk.Button(self.thickness_frame, text="Background", command=self.set_background)
@@ -236,7 +240,9 @@ class SVMTrainerApp:
             # Redraw the image on the canvas
             if self.image_id:
                 self.canvas.delete(self.image_id)
-            self.image_id = self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
+
+            mouse_x, mouse_y = pyautogui.position()
+            self.image_id = self.canvas.create_image(mouse_x, mouse_y, image=self.photo, anchor=tk.NW)
             self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
 
 if __name__ == "__main__":
