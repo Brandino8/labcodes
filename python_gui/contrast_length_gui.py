@@ -80,8 +80,8 @@ class ImageApp:
         self.current_scale = 1.0  # Initial scale of the image
 
         # Bind right-click and mouse wheel events for moving and zooming the image
-        self.canvas.bind("<ButtonPress-3>", self.start_move)
-        self.canvas.bind("<B3-Motion>", self.move_image)
+        self.canvas.bind('<ButtonPress-3>', self.move_from)
+        self.canvas.bind('<B3-Motion>',     self.move_to)
         self.canvas.bind("<MouseWheel>", self.zoom_image)
 
     def load_image(self):
@@ -95,6 +95,12 @@ class ImageApp:
                 self.canvas.delete(self.image_id)
             self.image_id = self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW, tags="image")  # Display image on canvas
             self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))  # Configure scroll region
+        
+        self.imscale = 1.0 
+        self.delta = 1.3
+        self.image = Image.open(file_path)
+        self.width, self.height = self.image.size
+        self.container = self.canvas.create_rectangle(0, 0, self.width, self.height, width=0)
 
     def enable_drawing(self):
         """Enable drawing mode."""
@@ -192,59 +198,72 @@ class ImageApp:
         avg_rgb = np.mean(rgb_values, axis=0).astype(int)  # Calculate the average RGB values
         return avg_rgb  # Return the average RGB values
 
-    def start_move(self, event):
-        """Start moving the image when the right mouse button is pressed."""
-        self.start_x = event.x
-        self.start_y = event.y
-
-    def move_image(self, event):
-        """Move the image on the canvas."""
-        if  self.movement_enabled.get():
-            dx = event.x - self.start_x
-            dy = event.y - self.start_y
-            self.canvas.move(self.image_id, dx, dy)
-            for line_id in self.lines:
-                self.canvas.move(line_id, dx, dy)
-            for label_id in self.line_labels:
-                self.canvas.move(label_id, dx, dy)
-            self.start_x = event.x
-            self.start_y = event.y
-
-    def zoom_image(self, event):
-        """Zoom the image in or out with the mouse wheel."""
-        if  self.movement_enabled.get():
-            if event.delta > 0:  # Zoom in
-                self.current_scale *= 1.1
-            elif event.delta < 0:  # Zoom out
-                self.current_scale /= 1.1
-
-            # Resize the image
-            new_size = (int(self.image.width * self.current_scale), int(self.image.height * self.current_scale))
-            resized_image = self.image.resize(new_size, Image.Resampling.LANCZOS)
-            self.photo = ImageTk.PhotoImage(resized_image)
-
-            # Redraw the image on the canvas
+    def move_from(self, event):
+        ''' Remember previous coordinates for scrolling with the mouse '''
+        if self.movement_enabled.get():
+            self.canvas.scan_mark(event.x, event.y)
+    def move_to(self, event):
+        ''' Drag (move) canvas to the new position '''
+        if self.movement_enabled.get():
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
             if self.image_id:
                 self.canvas.delete(self.image_id)
-            self.image_id = self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW, tags="image")
-            self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
+            self.show_image()  # redraw the image
 
-            # Move and scale lines and labels
-            for i, (start, end) in enumerate(self.original_line_coords):
-                if self.lines[i] is not None:
-                    scaled_start = (start[0] * self.current_scale, start[1] * self.current_scale)
-                    scaled_end = (end[0] * self.current_scale, end[1] * self.current_scale)
-                    self.canvas.coords(self.lines[i], scaled_start[0], scaled_start[1], scaled_end[0], scaled_end[1])
-                    line_length = np.sqrt((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2)
-                    micrometer_length = line_length / self.pixel_to_micrometer_ratio
-                    self.canvas.coords(self.line_labels[i],
-                                    (scaled_start[0] + scaled_end[0]) // 2,
-                                    (scaled_start[1] + scaled_end[1]) // 2)
-                    self.canvas.itemconfig(self.line_labels[i], text=f"{i + 1}: {micrometer_length:.2f} {'μm' if self.pixel_to_micrometer_ratio != 1 else 'px'}")
-
-            # Bring lines and labels to the front
-            self.canvas.tag_raise("line")
-            self.canvas.tag_raise("label")
+    def zoom_image(self, event):
+        if self.movement_enabled.get():
+            if self.image_id:
+                self.canvas.delete(self.image_id)
+            x = self.canvas.canvasx(event.x)
+            y = self.canvas.canvasy(event.y)
+            bbox = self.canvas.bbox(self.container)  # get image area
+            if bbox[0] < x < bbox[2] and bbox[1] < y < bbox[3]: pass  # Ok! Inside the image
+            else: return  # zoom only inside image area
+            scale = 1.0
+        # Respond to Linux (event.num) or Windows (event.delta) wheel event
+            if event.num == 5 or event.delta == -120:  # scroll down
+                i = min(self.width, self.height)
+                if int(i * self.imscale) < 30: return  # image is less than 30 pixels
+                self.imscale /= self.delta
+                scale        /= self.delta
+            if event.num == 4 or event.delta == 120:  # scroll up
+                i = min(self.canvas.winfo_width(), self.canvas.winfo_height())
+                if i < self.imscale: return  # 1 pixel is bigger than the visible area
+                self.imscale *= self.delta
+                scale        *= self.delta
+            self.canvas.scale('all', x, y, scale, scale)  # rescale all canvas objects
+            self.show_image()
+    def show_image(self, event=None):
+        ''' Show image on the Canvas '''
+        bbox1 = self.canvas.bbox(self.container)  # get image area
+        # Remove 1 pixel shift at the sides of the bbox1
+        bbox1 = (bbox1[0] + 1, bbox1[1] + 1, bbox1[2] - 1, bbox1[3] - 1)
+        bbox2 = (self.canvas.canvasx(0),  # get visible area of the canvas
+                 self.canvas.canvasy(0),
+                 self.canvas.canvasx(self.canvas.winfo_width()),
+                 self.canvas.canvasy(self.canvas.winfo_height()))
+        bbox = [min(bbox1[0], bbox2[0]), min(bbox1[1], bbox2[1]),  # get scroll region box
+                max(bbox1[2], bbox2[2]), max(bbox1[3], bbox2[3])]
+        if bbox[0] == bbox2[0] and bbox[2] == bbox2[2]:  # whole image in the visible area
+            bbox[0] = bbox1[0]
+            bbox[2] = bbox1[2]
+        if bbox[1] == bbox2[1] and bbox[3] == bbox2[3]:  # whole image in the visible area
+            bbox[1] = bbox1[1]
+            bbox[3] = bbox1[3]
+        self.canvas.configure(scrollregion=bbox)  # set scroll region
+        x1 = max(bbox2[0] - bbox1[0], 0)  # get coordinates (x1,y1,x2,y2) of the image tile
+        y1 = max(bbox2[1] - bbox1[1], 0)
+        x2 = min(bbox2[2], bbox1[2]) - bbox1[0]
+        y2 = min(bbox2[3], bbox1[3]) - bbox1[1]
+        if int(x2 - x1) > 0 and int(y2 - y1) > 0:  # show image if it in the visible area
+            x = min(int(x2 / self.imscale), self.width)   # sometimes it is larger on 1 pixel...
+            y = min(int(y2 / self.imscale), self.height)  # ...and sometimes not
+            image = self.image.crop((int(x1 / self.imscale), int(y1 / self.imscale), x, y))
+            imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1))))
+            imageid = self.canvas.create_image(max(bbox2[0], bbox1[0]), max(bbox2[1], bbox1[1]),
+                                               anchor='nw', image=imagetk)
+            self.canvas.lower(imageid)  # set image into background
+            self.canvas.imagetk = imagetk  # keep an extra reference to prevent garbage-collection
 
     def confirm_ratio(self):
         """Confirm the pixel-to-micrometer ratio and update the lengths of lines."""
